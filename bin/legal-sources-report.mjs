@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import pg from "pg";
 import { loadConfig } from "../lib/config.js";
 import { createS3 } from "../lib/s3.js";
-import { buildLegalSourcesReport, persistReport, shouldFail } from "../lib/legal-sources/report.js";
+import { buildLegalSourcesReport, buildWenshuEntry, persistReport, shouldFail } from "../lib/legal-sources/report.js";
 import { SOURCE_ADAPTERS } from "../lib/legal-sources/sources/index.js";
 
 export async function main() {
@@ -28,6 +28,10 @@ export async function main() {
       sources: [...SOURCE_ADAPTERS.keys()],
       pgClient: client,
     });
+    // wenshu rides the same 48h freshness caliber (heartbeat evidence, not
+    // judgment date); a stale heartbeat joins stale_sources so 断流 fails the run.
+    report.wenshu = await buildWenshuEntry({ s3, wenshuBucket: cfg.wenshuBucket, pgConfig: cfg.pg });
+    if (report.wenshu.stale) report.stale_sources.push("wenshu");
     console.log(JSON.stringify(report, null, 1));
     // Same-day reruns overwrite the same dated file (idempotent series key).
     await persistReport(s3, cfg.lawsBucket, report);

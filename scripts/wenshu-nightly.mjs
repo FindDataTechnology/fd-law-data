@@ -26,15 +26,20 @@
 // therefore costs a retry, nothing else.
 //
 // Usage:
-//   nohup node scripts/wenshu-nightly.mjs > /tmp/wenshu-nightly.log 2>&1 &
+//   nohup node scripts/wenshu-nightly.mjs > /tmp/wenshu-nightly.log 2>&1 &   (Mac)
+//   Windows (windows-admin): Task Scheduler starts the CDP browser via
+//   scripts/wenshu-standalone.cmd and this supervisor at boot; state lives in
+//   %USERPROFILE%\wenshu-nightly\.
 //   nohup node scripts/wenshu-nightly.mjs --run-now > … &     # crawl immediately
 //   nohup node scripts/wenshu-nightly.mjs --idle --hold 60 > … &  # keepalive only
 //   touch /tmp/wenshu-crawl-now                               # crawl as soon as possible
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "../lib/config.js";
+import { createS3 } from "../lib/s3.js";
+import { stateDirFor, WENSHU_LIVENESS_KEY } from "../lib/wenshu/nightly-paths.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, ".."); // fd-law-data
@@ -43,8 +48,12 @@ const HOME = "https://wenshu.court.gov.cn/website/wenshu/181029CR4M5A62CH/index.
 const LOGIN = "https://wenshu.court.gov.cn/website/wenshu/181010CARHS5BS3C/index.html";
 // 民事 list page: a session that can search is a session that can crawl.
 const PROBE_URL = "https://wenshu.court.gov.cn/website/wenshu/181217BMTKHNT2W0/index.html?pageId=fde099276267316234622fb6d3f9557d&s8=03";
-const STATE_PATH = "/tmp/wenshu-nightly-state.json";
-const TRIGGER = "/tmp/wenshu-crawl-now";
+// Mac legacy keeps /tmp; the Windows host (windows-admin) keeps state under the
+// user profile so it survives reboots. See lib/wenshu/nightly-paths.js.
+const STATE_DIR = stateDirFor();
+const STATE_PATH = resolve(STATE_DIR, "wenshu-nightly-state.json");
+const TRIGGER = resolve(STATE_DIR, "wenshu-crawl-now");
+mkdirSync(STATE_DIR, { recursive: true });
 const RETRY_MS = 30 * 60 * 1000; // session-invalid retry (human action needed)
 const OVERLAP_DAYS = 2; // late-upload overlap in front of the PG high-water mark
 const STEADY_WINDOW_DAYS = 3;
@@ -146,7 +155,48 @@ const state = {
   runs: Array.isArray(prevState?.runs) ? prevState.runs.slice(-19) : [],
   lastRun: prevState?.lastRun ?? null,
 };
-const persist = () => writeFileSync(STATE_PATH, JSON.stringify(state, null, 1));
+const persist = () => { writeFileSync(STATE_PATH, JSON.stringify(state, null, 1)); void uploadLiveness(); };
+
+// The cluster-side daily report cannot read this machine's state file, so every
+// persist also mirrors the freshness-relevant shape into the wenshu bucket
+// (best-effort, throttled — a dead uplink must never break the supervisor).
+let lastLivenessAt = 0;
+let livenessInFlight = false;
+async function uploadLiveness(force = false) {
+  const nowMs = Date.now();
+  if (!force && (livenessInFlight || nowMs - lastLivenessAt < 4 * 60 * 1000)) return;
+  lastLivenessAt = nowMs;
+  livenessInFlight = true;
+  try {
+    const cfg = loadConfig();
+    const s3 = createS3({
+      endpoint: cfg.s3Endpoint,
+      accessKey: cfg.s3AccessKey,
+      secretKey: cfg.s3SecretKey,
+      region: cfg.s3Region,
+    });
+    const body = JSON.stringify(
+      {
+        host: process.platform,
+        updatedAt: new Date().toISOString(),
+        mode: state.mode,
+        sessionInvalid: !!state.sessionInvalid,
+        accountBannedAt: state.accountBannedAt ?? null,
+        lastCycleStart: state.lastCycleStart ?? null,
+        lastRun: state.lastRun ?? null,
+        floor: state.floor ?? null,
+        dayCursor: state.dayCursor ?? null,
+      },
+      null,
+      1,
+    );
+    await s3.putObject(cfg.wenshuBucket, WENSHU_LIVENESS_KEY, body, { contentType: "application/json" });
+  } catch (err) {
+    log(`liveness upload failed (non-fatal): ${err?.message ?? err}`);
+  } finally {
+    livenessInFlight = false;
+  }
+}
 persist();
 
 // ---------------------------------------------------------------- PG high-water
@@ -230,8 +280,16 @@ async function ensureChrome() {
     log(`standing Chrome is gone (CDP ${CDP}) and --no-relaunch is set`);
     return false;
   }
-  log(`standing Chrome is gone — relaunching via scripts/wenshu-standalone.sh`);
-  spawn("bash", [resolve(HERE, "wenshu-standalone.sh")], { detached: true, stdio: "ignore" }).unref();
+  log(
+    process.platform === "win32"
+      ? `standing browser is gone — relaunching via scripts/wenshu-standalone.cmd`
+      : `standing Chrome is gone — relaunching via scripts/wenshu-standalone.sh`,
+  );
+  if (process.platform === "win32") {
+    spawn("cmd.exe", ["/c", resolve(HERE, "wenshu-standalone.cmd")], { detached: true, stdio: "ignore" }).unref();
+  } else {
+    spawn("bash", [resolve(HERE, "wenshu-standalone.sh")], { detached: true, stdio: "ignore" }).unref();
+  }
   for (let i = 0; i < 20; i++) {
     await sleep(3000);
     if (await chromeAlive()) {
