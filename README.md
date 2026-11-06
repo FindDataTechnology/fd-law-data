@@ -11,7 +11,7 @@ runtime dependencies: `pg` (flk loader) and `playwright` (wenshu browser side).
 | `bin/guide-cases-load.mjs` | `laws` bucket `guide-cases/` | `law_db.guide_cases` rows + curated 不再参照 status | **data machine** |
 | `scripts/verify-publish-format.mjs` | `law_db` | publish-format report + recommended first `--since` | data machine |
 | `bin/wenshu-login.mjs` | wenshu session bootstrap (local, headed; human solves the slider) | `wenshu` bucket `sessions/` session jar | local (operator machine) |
-| `bin/wenshu-crawl.mjs` | wenshu.court.gov.cn daily incremental (login-gated) | `wenshu` bucket `raw/{y}/{m}/` JSONL + manifest + seen-set | **windows-admin (100.64.0.5) — standing warm browser + nightly supervisor via Task Scheduler** (home broadband egress; the cluster CronJob is not a supported shape — see below; the operator Mac is a manual fallback host) |
+| `bin/wenshu-crawl.mjs` | wenshu.court.gov.cn daily incremental (login-gated) | `wenshu` bucket `raw/{y}/{m}/` JSONL + manifest + seen-set | **operator Mac only** (home IP + warm browser; the cluster CronJob is not a supported shape — see below) |
 | `bin/wenshu-load.mjs` | `wenshu` bucket `raw/` | `wenshu_db` src_files/dict_texts/judgments + month `blocks/` rebuild | **data machine** (wherever `wenshu_db` is reachable) |
 | `bin/wenshu-probe.mjs` | wenshu spike/diagnostics (local) | JSON probe report | local (needs valid session) |
 
@@ -474,16 +474,9 @@ already banned (read the warning at the top of
 
 ### Daily operation
 
-Nightly order, on the **promised host windows-admin** (China Mobile home
-broadband, warm browser on CDP 9223): Task Scheduler boots
-`scripts/wenshu-standalone.cmd` (CDP browser) and `wenshu-nightly.mjs`
-(supervisor) at startup; state lives in `%USERPROFILE%\wenshu-nightly\`.
-Re-login happens in that window — the supervisor's watch loop starts the crawl
-the moment a login lands. The supervisor mirrors freshness into
-`<wenshuBucket>/nightly/liveness.json`, which the daily legal-sources report
-reads: a heartbeat older than 48h marks wenshu stale (断流可见). The operator
-Mac remains a manual fallback (`node scripts/wenshu-nightly.mjs`, state in
-/tmp); `wenshu_db` is reachable over tailnet PG per `.env`.
+Nightly order, on the operator Mac (home IP, warm browser on CDP 9223):
+`wenshu-nightly.mjs` crawl → `bin/wenshu-load.mjs` (data machine, manual or
+cron — wherever `wenshu_db` is reachable; tailnet PG per `.env`).
 
 Meta-only runs (`--meta-only`) capture the full metadata row — 案号 / 标题 /
 判决时间 / 法院 — without touching a single detail page, and land as
