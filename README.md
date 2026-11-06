@@ -472,6 +472,32 @@ daily from the datacenter IP with the account attached while the account was
 already banned (read the warning at the top of
 `k8s/wenshu-crawl-cronjob.yaml` before re-applying it).
 
+### Monthly corpus packages (the 1e.5 channel)
+
+**Read this before treating the `wenshu_db` high-water mark as a freshness
+problem.** The account-based crawl route was abandoned on 2026-09-29
+(change `2026-09-29-wenshu-crawl-fleet-hardening`, tasks 1e.1/1e.3): after a
+second account ban, all wenshu traffic was stopped. Decision 1e.5 set the
+replacement channel: **2026 monthly corpus packages via the same channel as
+the 2025 CSVs** (import is hours, full text, no site exposure); a customer-run
+helper stays available for selected documents.
+
+Current state (verified in the live DB): `src_files` carries monthly feed
+registrations for 2024-10 … 2025-12; there are no 2026 feed rows and no
+`2026/` objects in the `wenshu` bucket. `judgments` holds 37,001,012 rows with
+`max(判决时间) = 2026-09-19` — the 2026-09-05…09-19 rows are the catalogue
+banked by 1e.4 (document URLs, no full text). **This is the post-shutdown
+steady state, not a stalled pipeline.** The 1e.5 follow-up — *confirm with the
+channel that 2026 monthly packages exist* — remains an external action and is
+tracked by `add-wenshu-monthly-corpus-intake`.
+
+When a package is delivered, `bin/wenshu-feed-import.mjs` registers it in
+`src_files` (schema `'D'`, non-`raw/` path) and loads it idempotently. The
+loader's feed-precedence rule then skips crawled daily files for that month;
+see the "Loader rules" section above. Running the import is the only way a
+month advances: nothing here fetches the site, and not running it changes no
+data.
+
 ### Daily operation
 
 Nightly order, on the operator Mac (home IP, warm browser on CDP 9223):
