@@ -547,7 +547,8 @@ metadata:
     app.kubernetes.io/part-of: finddata
 spec:
   schedule: "0 6 * * *"
-  suspend: true
+  # 2026-11-06: unsuspended for crawl-run-telemetry wiring (harden-crawl-gitops-foundation 5.2)
+  suspend: false
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -579,7 +580,66 @@ spec:
                   value: "us-east-1"
                 - name: LAWS_BUCKET
                   value: "laws"
-              command: ["node", "bin/legal-sources-report.mjs"]
+                # 2026-11-06 recovered: these five were live-only (out-of-band env
+                # drift — the 2026-09-27 reconciler-cronjob lesson repeats); they
+                # belong IN the manifest, restored from job spec of the last run.
+                - name: PG_HOST
+                  value: "100.64.0.5"
+                - name: PG_PORT
+                  value: "5432"
+                - name: PG_DATABASE
+                  value: "law_db"
+                - name: PG_USER
+                  valueFrom:
+                    secretKeyRef: { name: flk-law-pg-credentials, key: pg-user }
+                - name: PG_PASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: flk-law-pg-credentials, key: pg-password }
+                - name: FD_CRAWL_DB_URL
+                  valueFrom:
+                    secretKeyRef: { name: federation-db, key: url }
+                # 2026-11-06: same reporting contract as scripts/report_special_run.sh
+                # (harden-crawl-gitops-foundation 5.2) — image has no psql, so the
+                # same-covenant INSERT runs via node/pg. started_at is captured by
+                # the wrapper; rows_written sums sources[].total_rows; status
+                # success requires exit 0 AND no stale_sources. Best-effort: a
+                # report failure logs to stderr and never breaks the job.
+                - name: FD_RUN_STARTED
+                  value: ""
+              command: ["sh", "-c"]
+              args:
+                - |
+                  export FD_RUN_STARTED=$(date +%s)
+                  node bin/legal-sources-report.mjs > /tmp/report.json 2>/tmp/report.err
+                  RC=$?
+                  node -e '
+                    const fs = require("fs");
+                    const { Client } = require("pg");
+                    const rc = Number(process.argv[1]);
+                    let report = {};
+                    try { report = JSON.parse(fs.readFileSync("/tmp/report.json", "utf8")); } catch {}
+                    const rows = Object.values(report.sources || {}).reduce(
+                      (n, s) => n + (Number(s && s.db && s.db.total_rows) || 0), 0);
+                    const stale = (report.stale_sources || []).join(",");
+                    const status = rc === 0 && !stale ? "success" : "failed";
+                    const err = [rc ? "exit=" + rc : "", stale ? "stale=" + stale : "",
+                      fs.existsSync("/tmp/report.err") ? fs.readFileSync("/tmp/report.err", "utf8").slice(-200) : ""]
+                      .filter(Boolean).join(" | ").slice(0, 500);
+                    const url = process.env.FD_CRAWL_DB_URL;
+                    const t0 = Number(process.env.FD_RUN_STARTED) || Math.floor(Date.now() / 1000);
+                    const t1 = Math.floor(Date.now() / 1000);
+                    if (!url) { console.error("report_special_run: no FD_CRAWL_DB_URL; run not recorded"); process.exit(0); }
+                    (async () => {
+                      const c = new Client({ connectionString: url });
+                      await c.connect();
+                      await c.query(
+                        "INSERT INTO crawl_runs (source, kind, status, started_at, finished_at, rows_written, error_head) VALUES ($1,$2,$3,to_timestamp($4),to_timestamp($5),$6,$7)",
+                        ["legal-sources-report", "special-job", status, t0, t1, rows, err || null]);
+                      await c.end();
+                      console.log("report_special_run: legal-sources-report", status, "rows=" + rows);
+                    })().catch(e => { console.error("report_special_run: psql report failed:", e.message); process.exit(0); });
+                  ' "$RC" || true
+                  exit $RC
 ---
 apiVersion: batch/v1
 kind: CronJob
