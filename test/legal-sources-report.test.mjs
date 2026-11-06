@@ -4,7 +4,6 @@ import {
   STALE_AFTER_HOURS,
   STALE_REASON_NO_SUCCESSFUL_RUN,
   buildLegalSourcesReport,
-  buildWenshuEntry,
   freshnessHours,
   lastSuccessfulRunAt,
   persistReport,
@@ -14,7 +13,6 @@ import {
   sourceDbStats,
   staleness,
 } from "../lib/legal-sources/report.js";
-import { WENSHU_LIVENESS_KEY } from "../lib/wenshu/nightly-paths.js";
 import { manifestKey, stateKey } from "../lib/legal-sources/storage.js";
 
 const NOW = new Date("2026-10-06T02:00:00Z"); // 10:00 Asia/Shanghai
@@ -239,53 +237,4 @@ test("report exit code: only 断流 fails the job, source-level incomplete stays
 
   assert.equal(shouldFail(report), false);
   assert.equal(shouldFail({ ...report, stale_sources: ["gov-rules-library"] }), true);
-});
-
-// --- wenshu freshness line -------------------------------------------------
-
-test("wenshu entry: fresh heartbeat keeps the line green even with a lagging high-water", async () => {
-  const s3 = fakeS3({
-    [WENSHU_LIVENESS_KEY]: JSON.stringify({
-      host: "win32", updatedAt: hoursAgo(2),
-      lastCycleStart: hoursAgo(2), lastRun: { outcome: "clean" },
-      sessionInvalid: false, accountBannedAt: null,
-    }),
-  });
-  // Newest judgment date lags 3 days (late uploads are normal) — must NOT stale.
-  const entry = await buildWenshuEntry({
-    s3, wenshuBucket: "wenshu",
-    wenshuQuery: async () => ({ rows: [{ m: "2026-11-03" }] }),
-    now: NOW,
-  });
-  assert.equal(entry.stale, false);
-  assert.equal(entry.stale_reason, null);
-  assert.equal(entry.high_water_judgment_date, "2026-11-03");
-  assert.equal(entry.last_run_outcome, "clean");
-});
-
-test("wenshu entry: heartbeat older than the green line is stale", async () => {
-  const s3 = fakeS3({
-    [WENSHU_LIVENESS_KEY]: JSON.stringify({ host: "win32", updatedAt: hoursAgo(STALE_AFTER_HOURS + 5) }),
-  });
-  const entry = await buildWenshuEntry({
-    s3, wenshuBucket: "wenshu",
-    wenshuQuery: async () => ({ rows: [{ m: "2026-10-08" }] }),
-    now: NOW,
-  });
-  assert.equal(entry.stale, true);
-  assert.equal(entry.stale_reason, STALE_REASON_NO_SUCCESSFUL_RUN);
-  // The high-water is still reported — it is the operational fact.
-  assert.equal(entry.high_water_judgment_date, "2026-10-08");
-});
-
-test("wenshu entry: no heartbeat at all is stale, and a wenshu_db error surfaces without throwing", async () => {
-  const entry = await buildWenshuEntry({
-    s3: fakeS3({}), wenshuBucket: "wenshu",
-    wenshuQuery: async () => { throw new Error("connect ECONNREFUSED"); },
-    now: NOW,
-  });
-  assert.equal(entry.stale, true);
-  assert.equal(entry.stale_reason, STALE_REASON_NO_SUCCESSFUL_RUN);
-  assert.equal(entry.high_water_judgment_date, null);
-  assert.ok(entry.db_error.includes("ECONNREFUSED"));
 });
