@@ -475,18 +475,15 @@ already banned (read the warning at the top of
 ### Daily operation
 
 Nightly order, on the **promised host windows-admin** (China Mobile home
-broadband; the browser host is managed by the platform's Auth Broker — see
-`add-wenshu-auth-broker-identity`): the supervisor consumes a broker lease in
-`browser_session_host` mode; the isolated browser lives on this host's
-residential egress and is opened by the operator through the platform's
-internal login entry, where the human completes account + word-click captcha.
-The system never fills credentials or solves captchas on the operator's behalf.
-State lives in `%USERPROFILE%\wenshu-nightly\`. The supervisor mirrors
-freshness into `<wenshuBucket>/nightly/liveness.json`, which the daily
-legal-sources report reads: a heartbeat older than 48h marks wenshu stale
-(断流可见). The operator Mac remains a manual fallback (`node
-scripts/wenshu-nightly.mjs`, state in /tmp); `wenshu_db` is reachable over
-tailnet PG per `.env`.
+broadband, warm browser on CDP 9223): Task Scheduler boots
+`scripts/wenshu-standalone.cmd` (CDP browser) and `wenshu-nightly.mjs`
+(supervisor) at startup; state lives in `%USERPROFILE%\wenshu-nightly\`.
+Re-login happens in that window — the supervisor's watch loop starts the crawl
+the moment a login lands. The supervisor mirrors freshness into
+`<wenshuBucket>/nightly/liveness.json`, which the daily legal-sources report
+reads: a heartbeat older than 48h marks wenshu stale (断流可见). The operator
+Mac remains a manual fallback (`node scripts/wenshu-nightly.mjs`, state in
+/tmp); `wenshu_db` is reachable over tailnet PG per `.env`.
 
 Meta-only runs (`--meta-only`) capture the full metadata row — 案号 / 标题 /
 判决时间 / 法院 — without touching a single detail page, and land as
