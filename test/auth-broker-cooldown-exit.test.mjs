@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { acquireIdentityLease, cooldownExpired, COOLDOWN_MINUTES } from "/Users/chengsishi/finddata/fd-law-data/lib/auth-broker/identity.js";
+import { acquireIdentityLease, cooldownExpired, COOLDOWN_MINUTES } from "../lib/auth-broker/identity.js";
 
 function fakeClient(rows) {
   const calls = [];
