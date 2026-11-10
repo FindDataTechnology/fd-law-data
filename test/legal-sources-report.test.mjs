@@ -238,3 +238,72 @@ test("report exit code: only 断流 fails the job, source-level incomplete stays
   assert.equal(shouldFail(report), false);
   assert.equal(shouldFail({ ...report, stale_sources: ["gov-rules-library"] }), true);
 });
+
+// ── 装载停滞（load_stalled）──────────────────────────────────────────────────
+// 2026-11-10 实测：crawl 天天跑、state.json 天天新，于是 freshnessAt 用 max()
+// 取到很新的值、整条源判为「新鲜」；而 load 侧被挂起，库里 mfa-treaty 35 天、
+// party-regulation 33 天没有一行新数据。日报告连续一个月是绿的。
+
+test("load_stalled: crawl 有新产出而库不跟着长 → 报装载停滞", async () => {
+  const govManifest = manifest({ finishedAt: hoursAgo(2) });
+  const s3 = fakeS3({
+    [manifestKey("gov-rules-library", govManifest.runDate, govManifest.runId)]: govManifest,
+    [stateKey("gov-rules-library")]: { version: 1, updatedAt: hoursAgo(2) },
+  });
+  const pg = fakePg({
+    stats: {
+      "gov-rules-library": {
+        total_rows: 100, last_fetched_at: hoursAgo(24 * 33), new_today: 0, new_7d: 0, effective_body_rows: 90,
+      },
+    },
+  });
+  const report = await buildLegalSourcesReport({
+    s3, bucket: "laws", sources: ["gov-rules-library"], pgClient: pg, now: NOW,
+  });
+  const gov = report.sources["gov-rules-library"];
+  assert.equal(gov.stale, false, "crawl 新鲜时不算断流（这是原有语义）");
+  assert.equal(gov.load_stalled, true);
+  assert.deepEqual(report.load_stalled_sources, ["gov-rules-library"]);
+  assert.equal(shouldFail(report), true, "库里不进数必须让日报告红");
+});
+
+test("load_stalled: 安静的上游（无新 manifest）不误报", async () => {
+  // 上游确实没有新文书：crawl 没有产出新 manifest，state 也未推进，
+  // crawlAt 与 last_fetched_at 同时停留在很久以前 —— 两边同步，不是停滞。
+  const s3 = fakeS3({});
+  const pg = fakePg({
+    stats: {
+      "mfa-treaty-library": {
+        total_rows: 50, last_fetched_at: hoursAgo(24 * 35), new_today: 0, new_7d: 0, effective_body_rows: 50,
+      },
+    },
+  });
+  const report = await buildLegalSourcesReport({
+    s3, bucket: "laws", sources: ["mfa-treaty-library"], pgClient: pg, now: NOW,
+  });
+  assert.equal(report.sources["mfa-treaty-library"].load_stalled, false);
+  assert.deepEqual(report.load_stalled_sources, []);
+});
+
+test("load_stalled: 库里一行都没有且 crawl 有产出 → 也算停滞", async () => {
+  const m = manifest({ finishedAt: hoursAgo(3) });
+  const s3 = fakeS3({ [manifestKey("party-regulation-library", m.runDate, m.runId)]: m });
+  const pg = fakePg({ stats: { "party-regulation-library": { total_rows: 0, last_fetched_at: null } } });
+  const report = await buildLegalSourcesReport({
+    s3, bucket: "laws", sources: ["party-regulation-library"], pgClient: pg, now: NOW,
+  });
+  assert.equal(report.sources["party-regulation-library"].load_stalled, true);
+});
+
+test("load_stalled: 已断流时不重复计入（stale 优先）", async () => {
+  const old = manifest({ finishedAt: hoursAgo(24 * 5) });
+  const s3 = fakeS3({ [manifestKey("ccdi-supervisory-regulations", old.runDate, old.runId)]: old });
+  const pg = fakePg({
+    stats: { "ccdi-supervisory-regulations": { total_rows: 10, last_fetched_at: hoursAgo(24 * 10) } },
+  });
+  const report = await buildLegalSourcesReport({
+    s3, bucket: "laws", sources: ["ccdi-supervisory-regulations"], pgClient: pg, now: NOW,
+  });
+  assert.deepEqual(report.stale_sources, ["ccdi-supervisory-regulations"]);
+  assert.deepEqual(report.load_stalled_sources, [], "断流已经表达了同一个事实，不重复报");
+});
