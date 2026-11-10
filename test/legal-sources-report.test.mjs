@@ -57,13 +57,13 @@ function fakePg({ stats = {} } = {}) {
   };
 }
 
-function manifest({ finishedAt, complete = true, aborted = null }) {
+function manifest({ finishedAt, complete = true, aborted = null, emitted = null }) {
   return {
     version: 1,
     runDate: finishedAt.slice(0, 10),
     runId: finishedAt.replace(/\D/g, "").slice(0, 14),
     finishedAt,
-    coverage: { complete, emitted: complete ? 5 : 2, failures: complete ? 0 : 7 },
+    coverage: { complete, emitted: emitted ?? (complete ? 5 : 2), failures: complete ? 0 : 7 },
     aborted,
   };
 }
@@ -306,4 +306,29 @@ test("load_stalled: 已断流时不重复计入（stale 优先）", async () => 
   });
   assert.deepEqual(report.stale_sources, ["ccdi-supervisory-regulations"]);
   assert.deepEqual(report.load_stalled_sources, [], "断流已经表达了同一个事实，不重复报");
+});
+
+test("load_stalled: 零产出的干净跑批 + state 推进，不算装载停滞（安静上游）", async () => {
+  // 这是判据最容易写错的地方：拿 state_updated_at 当锚点会把「每天跑、每天 0 新增」
+  // 误判成装载停滞。实测样本 mfa-treaty：crawl/load 每天 success、rows=0、
+  // state 每天推进，库里 35 天没新行 —— 上游确实没有新条约，不是故障。
+  const zeroManifest = manifest({ finishedAt: hoursAgo(20), emitted: 0 });
+  const s3 = fakeS3({
+    [manifestKey("mfa-treaty-library", zeroManifest.runDate, zeroManifest.runId)]: zeroManifest,
+    [stateKey("mfa-treaty-library")]: { version: 1, updatedAt: hoursAgo(2) },
+  });
+  const pg = fakePg({
+    stats: {
+      "mfa-treaty-library": {
+        total_rows: 7408, last_fetched_at: hoursAgo(24 * 35), new_today: 0, new_7d: 0, effective_body_rows: 7000,
+      },
+    },
+  });
+  const report = await buildLegalSourcesReport({
+    s3, bucket: "laws", sources: ["mfa-treaty-library"], pgClient: pg, now: NOW,
+  });
+  const mfa = report.sources["mfa-treaty-library"];
+  assert.equal(mfa.stale, false, "零新增的干净跑批是新鲜");
+  assert.equal(mfa.load_stalled, false, "零产出不构成装载停滞");
+  assert.equal(shouldFail(report), false);
 });
