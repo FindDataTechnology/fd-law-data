@@ -19,10 +19,21 @@ import { execFileSync } from "node:child_process";
  *      否则这个新判据在 crawl_runs 里永远看不见。
  */
 
-const CHART = path.resolve(import.meta.dirname, "..", "..", "helm-law-scraw");
+// chart 是**相邻检出**（~/finddata/helm-law-scraw），不是本仓的一部分。
+// 用 FD_LAW_CHART_DIR 可显式指定；找不到就 skip —— 不能 fail：
+// 公开镜像仓 scs001/fd-law-data 只 checkout 本仓，它的 `npm test` 是出片前置，
+// 在这里硬失败会把整条出片卡死（2026-11-11 实测：/tmp/mirror 里直接报
+// `path "/private/tmp/helm-law-scraw" not found`）。
+const CHART = process.env.FD_LAW_CHART_DIR
+  ? path.resolve(process.env.FD_LAW_CHART_DIR)
+  : path.resolve(import.meta.dirname, "..", "..", "helm-law-scraw");
 const HAVE_HELM = (() => {
   try { execFileSync("helm", ["version"], { stdio: "ignore" }); return true; } catch { return false; }
 })();
+const HAVE_CHART = fs.existsSync(path.join(CHART, "Chart.yaml"));
+const SKIP_REASON = !HAVE_HELM
+  ? "helm 不可用"
+  : (!HAVE_CHART ? `未找到 chart（${CHART}）；设 FD_LAW_CHART_DIR 或与该仓同级检出` : false);
 
 function recorderFromChart() {
   const out = execFileSync("helm", ["template", "law-craw", CHART, "--namespace", "scraw"], { encoding: "utf8" });
@@ -43,7 +54,7 @@ function recorderFromChart() {
   return lines.join("\n").trimEnd();
 }
 
-const CHART_SCRIPT = HAVE_HELM ? recorderFromChart() : null;
+const CHART_SCRIPT = (HAVE_HELM && HAVE_CHART) ? recorderFromChart() : null;
 
 /** 旧记录器：收编前现场跑的那一份（逐字留档，作为向后兼容的对照组）。 */
 const LEGACY_SCRIPT = `export FD_RUN_STARTED=$(date +%s)
@@ -116,14 +127,14 @@ const CASES = [
 ];
 
 for (const c of CASES) {
-  test(`记录器向后兼容：${c.name} 时新脚本与旧脚本逐字段一致`, { skip: !CHART_SCRIPT && "helm 不可用" }, () => {
+  test(`记录器向后兼容：${c.name} 时新脚本与旧脚本逐字段一致`, { skip: SKIP_REASON }, () => {
     const old = sandbox(LEGACY_SCRIPT, c);
     const cur = sandbox(CHART_SCRIPT, c);
     assert.deepEqual(cur, old);
   });
 }
 
-test("记录器：报告带 load_stalled_sources 时必须落进 status 与 error_head", { skip: !CHART_SCRIPT && "helm 不可用" }, () => {
+test("记录器：报告带 load_stalled_sources 时必须落进 status 与 error_head", { skip: SKIP_REASON }, () => {
   const out = sandbox(CHART_SCRIPT, {
     rc: 0,
     report: { sources: { s: { db: { total_rows: 10 } } }, stale_sources: [], load_stalled_sources: ["gov-rules-library"] },
