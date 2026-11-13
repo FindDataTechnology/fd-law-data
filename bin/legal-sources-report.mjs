@@ -11,6 +11,20 @@ import { createS3 } from "../lib/s3.js";
 import { buildLegalSourcesReport, persistReport, shouldFail } from "../lib/legal-sources/report.js";
 import { SOURCE_ADAPTERS } from "../lib/legal-sources/sources/index.js";
 
+// 未点亮（CronJob 挂起）的源清单，由部署清单渲染成 env 传入（逗号分隔）。
+// 不内省集群：本任务只有 PG 只读凭据，没有也不该有集群权限。
+function pausedSourcesFromEnv(env = process.env, known = [...SOURCE_ADAPTERS.keys()]) {
+  const raw = String(env.LEGAL_PAUSED_SOURCES || "");
+  const names = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  const knownSet = new Set(known);
+  const unknown = names.filter((n) => !knownSet.has(n));
+  // 拼写错误会让「暂停」静默不生效、报告继续每天红 —— 宁可吵一句。
+  if (unknown.length) {
+    console.error(`[legal-sources-report] LEGAL_PAUSED_SOURCES 含未知源名，已忽略：${unknown.join(",")}`);
+  }
+  return names.filter((n) => knownSet.has(n));
+}
+
 export async function main() {
   const cfg = loadConfig();
   const s3 = createS3({
@@ -27,6 +41,7 @@ export async function main() {
       bucket: cfg.lawsBucket,
       sources: [...SOURCE_ADAPTERS.keys()],
       pgClient: client,
+      pausedSources: pausedSourcesFromEnv(),
     });
     console.log(JSON.stringify(report, null, 1));
     // Same-day reruns overwrite the same dated file (idempotent series key).
