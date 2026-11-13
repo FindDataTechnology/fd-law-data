@@ -142,6 +142,28 @@ must pass login-proxy probe, crawl-proxy probe and a small-batch run before it
 is allowed. Logs emit identity/proxy/status only; tokens, cookies, names and
 national identifiers are redacted.
 
+### 登录态过期：症状 → 归因 → 处置（2026-11-13 实查）
+
+`rmfyalk-case-library` 的登录门会过期，而它过期后的**外在表现不在爬虫上**，在每日报告上——
+容易被误判成"报告脚本坏了"：
+
+| 观察到的 | 含义 |
+|---|---|
+| `crawl_runs` 里 `source='legal-sources-report'` 连续几天 `status=failed`、`rows_written=47309` 不变 | 报告本身跑通了，是**判定**为失败 |
+| 同一条的 `error_head` = `exit=2 \| stale=rmfyalk-case-library` | 报告退 2，且只点名这一个源陈旧 |
+| `kubectl -n scraw get cronjob rmfyalk-case-crawl` → `suspend=true`、`lastScheduleTime` **为空** | 抓取被停（历史遗留），源必然陈旧 |
+| 用同凭据做 1 页探活 `node bin/rmfyalk-crawl.mjs --dry-run --size 1 --max-pages 1` | 得 `AuthBrokerClientError: identity is not eligible for lease (login_required)` / 409 `IDENTITY_NOT_ELIGIBLE` |
+
+**结论**：`suspend` 是对的，别急着开回——身份处于 `login_required`，开回只会每天 409。
+**处置**：跑 `k8s/legal-auth-broker.yaml` 里的 `legal-auth-rmfyalk-acct001-login` Job，
+`kubectl port-forward pod/<pod> 6080:6080`，在 `http://127.0.0.1:6080/vnc.html`
+（密码 = secret `legal-auth-broker` 的 `vnc-password`）**由人完成上游登录**，
+把 cookie jar 写进 PVC profile；之后按点亮门走一遍（dry-run → QA → 3 天观察）才允许 `suspend=false`。
+
+这一步**不能自动化**：需要真人在目标站点过登录（可能含短信/扫码），
+CI 代签只会造出"看起来开回来了"的假象。反过来也别把 `stale` 改成静默——
+那条告警是**如实**在说"这个源的数据是旧的"。
+
 ### Lighting-up gate (点亮门) before enabling CronJobs
 
 A source may be unsuspended only after **all** of the following hold. The gate
