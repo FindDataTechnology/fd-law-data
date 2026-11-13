@@ -99,3 +99,39 @@ test("invalid source ids fail loudly", () => {
   assert.throws(() => sourcePrefix("../escape"), /invalid legal source id/);
   assert.throws(() => sourcePrefix(""), /invalid legal source id/);
 });
+
+// state.json 是这一族里唯一随语料单调增长的对象（gov-rules 实测 1.43MB），
+// 而 s3.js 的 timeoutMs 是**总预算且包含 body 读**。实测链路吞吐可掉到
+// 0.02MB/s ⇒ 1.4MB 需要 70 秒，默认 60s 必然失败。
+//
+// 判据钉在**行为**上（loadState 实际传给 getObject 的值），不钉常量字面量：
+// 常量改小到覆盖不了实测最坏值就该红，改大不该红。
+test("state.json 的读取预算覆盖实测最坏的链路吞吐", async () => {
+  const { loadState } = await import("../lib/legal-sources/state.js");
+  const { stateKey, STATE_READ_TIMEOUT_MS } = await import("../lib/legal-sources/storage.js");
+
+  const calls = [];
+  const s3 = {
+    async getObject(bucket, key, opts) {
+      calls.push({ bucket, key, opts });
+      return Buffer.from(JSON.stringify({ source: "gov-rules-library", hashes: {}, failures: {} }));
+    },
+  };
+  await loadState(s3, "laws", "gov-rules-library");
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].key, stateKey("gov-rules-library"));
+  const budget = calls[0].opts?.timeoutMs;
+  assert.equal(typeof budget, "number", "loadState 必须显式给 state 读取一个预算，不能吃 60s 默认值");
+
+  // 实测：gov-rules state.json 1430410B，链路最差 0.02MB/s ⇒ 约 70s。
+  // 预算至少要能容下「比实测最差再差 4 倍」的那一档，否则同一形态必然复发。
+  const measuredWorstBytes = 1430410;
+  const measuredWorstBytesPerSec = 0.02 * 1024 * 1024;
+  const measuredWorstMs = (measuredWorstBytes / measuredWorstBytesPerSec) * 1000;
+  assert.ok(
+    budget >= measuredWorstMs * 4,
+    `state 读取预算 ${budget}ms 覆盖不了实测最坏 ${Math.round(measuredWorstMs)}ms 的 4 倍余量`,
+  );
+  assert.equal(budget, STATE_READ_TIMEOUT_MS);
+});
