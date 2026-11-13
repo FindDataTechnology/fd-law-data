@@ -111,3 +111,17 @@ test("流式读取仍可用（getReader 路径不被缓冲掉）", async () => {
     await up.close();
   }
 });
+
+test("无正文状态（204）不会因 Response 构造函数抛错", async () => {
+  const up = await serve((_req, res) => {
+    res.writeHead(204);
+    res.end();
+  });
+  try {
+    const res = await fetchWithRetry(up.url, {}, { retries: 0, timeoutMs: 5000, rateLimit: false });
+    assert.equal(res.status, 204);
+    assert.equal(res.body, null);
+  } finally {
+    await up.close();
+  }
+});
