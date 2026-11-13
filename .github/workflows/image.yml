@@ -98,6 +98,13 @@ jobs:
           echo "digest=$cur" >> "$GITHUB_OUTPUT"
           echo "${{ matrix.image }} main 当前 digest: ${cur:-<不存在，本次为首次构建>}"
 
+      # 与下面「铸不可变 tag」用的是**同一个表达式**：镜像把自己烘进的 tag 说成
+      # sha-<7>，而它被推上去的 tag 也是 sha-<7>。两处各写一份就会漂（实测两遍），
+      # 所以这里只算一次，两处都读它。
+      - id: tag
+        name: 算不可变 tag（构建参数与铸 tag 共用）
+        run: echo "immutable=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
       - id: build
         uses: docker/build-push-action@v6
         with:
@@ -108,6 +115,8 @@ jobs:
           # 硬约束：开了 attestation，同内容两次构建 digest 必然不同，闸门永久失效。
           provenance: false
           tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            IMAGE_TAG=${{ steps.tag.outputs.immutable }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,scope=${{ matrix.image }},mode=max
 
@@ -134,6 +143,10 @@ jobs:
             exit 0
           fi
           tag="sha-${GITHUB_SHA::7}"
+          # 与构建参数同一个值：IMAGE_TAG 烘进镜像、这里铸成 tag，两处必须逐字相同，
+          # 否则镜像自报的 tag 与真 tag 分叉（那正是 11-11/11-12 遥测撒谎的形态）。
+          [ "$tag" = "${{ steps.tag.outputs.immutable }}" ] || {
+            echo "::error::铸出的 tag ($tag) 与构建参数 (${{ steps.tag.outputs.immutable }}) 不一致"; exit 1; }
           docker buildx imagetools create -t "$img:$tag" "$img@$NEW"
           echo "已铸 $IMAGE:$tag → $NEW"
           {

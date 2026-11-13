@@ -1,9 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   KIND,
   SOURCE_CRONJOBS,
   createTelemetry,
+  defaultImageTag,
   errorHead,
   finishRun,
   startRun,
@@ -92,6 +96,32 @@ test("startRun inserts a running row and returns its id; finishRun closes it wit
   assert.equal(update.params[4], 42);
   assert.deepEqual(lines, []);
   assert.equal(clients.calls.ended, clients.calls.created, "every opened client is closed");
+});
+
+test("baked /app/IMAGE_TAG 优先于手写的 FD_RUNNER_IMAGE_TAG", () => {
+  // 判据只认**镜像自报**：手写 env 与清单 image: 各写一份，漏改一处就撒谎
+  // （2026-11-14 两天内测到两遍：行写 sha-b63d0d1 真跑 sha-30f5179；
+  // 行写 sha-e584fc5 真跑 sha-f07f441）。这一列是判「修复在不在镜像里」的读数。
+  const dir = mkdtempSync(join(tmpdir(), "fd-imgtag-"));
+  try {
+    const baked = join(dir, "IMAGE_TAG");
+    writeFileSync(baked, "sha-f07f441\n");
+    assert.equal(
+      defaultImageTag({ imageTagFile: baked, env: { FD_RUNNER_IMAGE_TAG: "sha-e584fc5" } }),
+      "sha-f07f441",
+      "镜像自报的 tag 必须赢过手写 env —— 手写的会漂",
+    );
+    // 镜像里没有这个文件时（本地/测试环境）才轮到 env
+    assert.equal(
+      defaultImageTag({ imageTagFile: join(dir, "absent"), env: { FD_RUNNER_IMAGE_TAG: "sha-e584fc5" } }),
+      "sha-e584fc5",
+    );
+    // 空文件不算自报（构建期变量为空时不许冒充某一片）
+    writeFileSync(baked, "\n");
+    assert.equal(defaultImageTag({ imageTagFile: baked, env: { FD_RUNNER_IMAGE_TAG: "sha-x" } }), "sha-x");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("image_tag falls back to FD_RUNNER_IMAGE_TAG then the package version", async () => {
