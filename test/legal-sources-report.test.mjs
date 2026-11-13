@@ -332,3 +332,79 @@ test("load_stalled: 零产出的干净跑批 + state 推进，不算装载停滞
   assert.equal(mfa.load_stalled, false, "零产出不构成装载停滞");
   assert.equal(shouldFail(report), false);
 });
+
+// ── 未点亮（paused）vs 断流（stale）────────────────────────────────────────
+// 2026-11-13 实测：rmfyalk-case-library 的 crawl CronJob 自 2026-09-24 建图起
+// suspend=true（从没点亮过），而报告按「无成功证据 → stale」把它判红，
+// crawl_runs 里连续 62 次 failed（exit=2）。规格 R1 要求未过点亮门的源保持挂起，
+// R4 的断流口径写的是「连续 2 轮定时运行失败」——挂起的源根本没运行。两状态必须分开。
+
+test("paused: 挂起且无证据 → 判 paused，不进 stale_sources，不让任务失败", async () => {
+  const s3 = fakeS3({});
+  const pg = fakePg();
+  const report = await buildLegalSourcesReport({
+    s3, bucket: "laws", sources: ["rmfyalk-case-library"], pgClient: pg, now: NOW,
+    pausedSources: ["rmfyalk-case-library"],
+  });
+
+  const entry = report.sources["rmfyalk-case-library"];
+  assert.equal(entry.stale, true, "事实层面确实没有绿线内的成功证据");
+  assert.equal(entry.paused, true, "但它是按点亮门合法停着的");
+  assert.equal(entry.status, "paused");
+  assert.deepEqual(report.paused_sources, ["rmfyalk-case-library"]);
+  assert.deepEqual(report.stale_sources, [], "暂停源不得计入断流");
+  assert.equal(shouldFail(report), false);
+});
+
+test("paused: 清单说暂停但绿线内有证据 → 以证据为准判正常", async () => {
+  const m = manifest({ finishedAt: hoursAgo(2) });
+  const s3 = fakeS3({ [manifestKey("rmfyalk-case-library", m.runDate, m.runId)]: m });
+  // 库侧也要有对应产出，否则触发的是既有的「装载停滞」判据（另一条口径）。
+  const pg = fakePg({
+    stats: {
+      "rmfyalk-case-library": {
+        total_rows: 10, last_fetched_at: hoursAgo(2), new_today: 1, new_7d: 2, effective_body_rows: 10,
+      },
+    },
+  });
+  const report = await buildLegalSourcesReport({
+    s3, bucket: "laws", sources: ["rmfyalk-case-library"], pgClient: pg, now: NOW,
+    pausedSources: ["rmfyalk-case-library"],
+  });
+
+  const entry = report.sources["rmfyalk-case-library"];
+  assert.equal(entry.stale, false);
+  assert.equal(entry.paused, false, "有证据就不是暂停");
+  assert.equal(entry.status, "ok");
+  assert.deepEqual(report.paused_sources, []);
+});
+
+test("paused 反向对照：不在清单里的源照旧判 stale 并让任务失败", async () => {
+  const s3 = fakeS3({});
+  const pg = fakePg();
+  const report = await buildLegalSourcesReport({
+    s3, bucket: "laws", sources: ["gov-rules-library"], pgClient: pg, now: NOW,
+    pausedSources: ["rmfyalk-case-library"],
+  });
+
+  const entry = report.sources["gov-rules-library"];
+  assert.equal(entry.paused, false);
+  assert.equal(entry.status, "stale");
+  assert.deepEqual(report.stale_sources, ["gov-rules-library"]);
+  assert.deepEqual(report.paused_sources, []);
+  assert.equal(shouldFail(report), true);
+});
+
+test("paused: 混合场景——暂停源单列，另一源真断流仍然红", async () => {
+  const s3 = fakeS3({});
+  const pg = fakePg();
+  const report = await buildLegalSourcesReport({
+    s3, bucket: "laws",
+    sources: ["rmfyalk-case-library", "gov-rules-library"],
+    pgClient: pg, now: NOW,
+    pausedSources: ["rmfyalk-case-library"],
+  });
+  assert.deepEqual(report.paused_sources, ["rmfyalk-case-library"]);
+  assert.deepEqual(report.stale_sources, ["gov-rules-library"]);
+  assert.equal(shouldFail(report), true, "暂停源不该把真断流一起压绿");
+});

@@ -31,12 +31,31 @@ const HAVE_HELM = (() => {
   try { execFileSync("helm", ["version"], { stdio: "ignore" }); return true; } catch { return false; }
 })();
 const HAVE_CHART = fs.existsSync(path.join(CHART, "Chart.yaml"));
-const SKIP_REASON = !HAVE_HELM
+let SKIP_REASON = !HAVE_HELM
   ? "helm 不可用"
   : (!HAVE_CHART ? `未找到 chart（${CHART}）；设 FD_LAW_CHART_DIR 或与该仓同级检出` : false);
 
+// 这些带外值只用来喂 chart 的 `required` 校验——记录器 args 里一个字都不引用它们
+// （它只读 report.json 与 crawl_runs）。不补 stub 的话 helm 直接渲染失败
+// （`缺少 legalSources.rustfs.endpoint：内网端点写在带外 values-private.yaml`），
+// 而用例在模块加载期就要渲染一次 → 整个文件炸掉。而本文件的契约是「不能 fail」：
+// 公开镜像仓 scs001/fd-law-data 只 checkout 本仓，它的 npm test 是出片前置。
+// 2026-11-13 实测：该用例连续红，原因就是 chart 给这些值加了 required。
+const STUB_VALUES = [
+  "legalSources.rustfs.endpoint=http://stub.invalid:9000",
+  "legalSources.postgres.host=stub.invalid",
+  "private.accountId=stub",
+  "flkLawCrawl.rustfs.endpoint=http://stub.invalid:9000",
+  "authBroker.rustfs.endpoint=http://stub.invalid:9000",
+  "authBroker.postgres.host=stub.invalid",
+].flatMap((kv) => ["--set", kv]);
+
 function recorderFromChart() {
-  const out = execFileSync("helm", ["template", "law-craw", CHART, "--namespace", "scraw"], { encoding: "utf8" });
+  const out = execFileSync(
+    "helm",
+    ["template", "law-craw", CHART, "--namespace", "scraw", ...STUB_VALUES],
+    { encoding: "utf8" },
+  );
   // 只取 legal-sources-report 这个 CronJob 的容器 args
   const doc = out.split(/^---$/m).find((d) => d.includes("name: legal-sources-report") && d.includes("kind: CronJob"));
   const argsBlock = doc.split("args:")[1];
@@ -54,7 +73,17 @@ function recorderFromChart() {
   return lines.join("\n").trimEnd();
 }
 
-const CHART_SCRIPT = (HAVE_HELM && HAVE_CHART) ? recorderFromChart() : null;
+// 渲染失败也要退化成 skip，而不是让整个文件在加载期炸掉（见上面 STUB_VALUES 的说明）。
+// 但仍保留 skip 原因里的一行原文 —— 别让「渲染坏了」被静默吞掉。
+let CHART_SCRIPT = null;
+if (HAVE_HELM && HAVE_CHART) {
+  try {
+    CHART_SCRIPT = recorderFromChart();
+  } catch (err) {
+    const first = String(err?.stderr || err?.message || err).trim().split("\n")[0];
+    SKIP_REASON = `chart 渲染失败：${first}`;
+  }
+}
 
 /** 旧记录器：收编前现场跑的那一份（逐字留档，作为向后兼容的对照组）。 */
 const LEGACY_SCRIPT = `export FD_RUN_STARTED=$(date +%s)
