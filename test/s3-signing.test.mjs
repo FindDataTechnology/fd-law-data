@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createS3, putIfChanged } from "../lib/s3.js";
+import { createS3, putIfChanged, writeTimeoutMsFor,
+         WRITE_TIMEOUT_FLOOR_MS, WRITE_TIMEOUT_CEIL_MS } from "../lib/s3.js";
 
 // Optional live check: set RUSTFS_SMOKE=1 with real .env creds to verify
 // SigV4 signing against the actual RustFS (read-only listBuckets).
@@ -95,4 +96,42 @@ test("live SigV4 smoke (RUSTFS_SMOKE=1)", async (t) => {
   const buckets = await s3.listBuckets();
   assert.ok(Array.isArray(buckets));
   console.log("buckets:", buckets.join(", "));
+});
+
+// ── 写预算按对象大小算 ────────────────────────────────────────────────────
+//
+// 2026-11-14 实测（真实代码路径，xinru → RustFS）：4MB/30.9s = 132KB/s 通过，
+// 8MB 在 60s 上限被 abort ⇒ 60s 默认值等于「≈8MB 以上永远写不进去」，
+// 而扫描版 PDF 就这个尺寸。写不进去不是慢，是文档永不收敛（附件上传抛错
+// → rememberFailure → state 哈希不落盘 → 每天重下重试 → failure threshold
+// 把整轮 abort，03:20 那轮 mfa-treaty-crawl 就是这样 emitted=0）。
+test("writeTimeoutMsFor: 小对象守 60s 下限，大对象按字节放大，封顶 900s", () => {
+  const MB = 1024 * 1024;
+  assert.equal(writeTimeoutMsFor(0), WRITE_TIMEOUT_FLOOR_MS);
+  assert.equal(writeTimeoutMsFor(64 * 1024), WRITE_TIMEOUT_FLOOR_MS);
+  assert.equal(writeTimeoutMsFor(1 * MB), 96_000);
+  assert.equal(writeTimeoutMsFor(4 * MB), 384_000);
+  // 实测会超时的那个尺寸：8MB 必须拿到远大于 60s 的预算，而不是被 abort
+  assert.equal(writeTimeoutMsFor(8 * MB), 768_000);
+  assert.ok(writeTimeoutMsFor(8 * MB) > 60_000);
+  assert.equal(writeTimeoutMsFor(64 * MB), WRITE_TIMEOUT_CEIL_MS);
+  assert.equal(writeTimeoutMsFor(Number.NaN), WRITE_TIMEOUT_FLOOR_MS, "坏输入退回下限，不许变成 NaN 预算");
+});
+
+test("putObject 把显式 timeoutMs 传到请求上（默认预算不是死值）", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (url, { signal } = {}) =>
+    new Promise((resolve, reject) => {
+      signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
+    });
+  try {
+    const s3 = createS3({ endpoint: "http://127.0.0.1:9", accessKey: "a", secretKey: "b" });
+    await assert.rejects(
+      () => s3.putObject("b", "k", Buffer.alloc(1024), { timeoutMs: 25 }),
+      /timed out after 25ms/,
+      "putObject 必须接受并转发 timeoutMs —— 否则大对象只能吃 60s 默认值",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
