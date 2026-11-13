@@ -29,11 +29,13 @@ rsync -a --delete \
   --exclude='k8s' --exclude='docs/incidents' \
   --exclude='.env' --exclude='.env.*' --exclude='*creds*.txt' \
   --exclude='kubeconfig*' --exclude='.harbor-*' \
+  --exclude='graphify-out' --exclude='.work-*' \
   "$SRC/" "$MIRROR/"
 
 cd "$MIRROR"
 
 python3 - <<'PY'
+import re
 from pathlib import Path
 
 def patch(path, old, new):
@@ -136,6 +138,27 @@ patch(".github/workflows/image.yml",
 #                          2026-10-09 改名对齐，避免双名分叉）""",
       """#   legal-auth-broker   ← Dockerfile.auth-broker（部署清单按此名引用；原名
 #                          fd-law-data-auth-broker 无消费方，2026-10-09 改名对齐）""")
+
+# ── 触发器必须还原：这一处镜像仓与私源**本来就该不同** ──────────────────────
+#
+# 私源 2026-11-09 为省私有额度把 `push:` 删了，只留 workflow_dispatch（注释写得很
+# 清楚：本仓 CI 因组织私有额度耗尽而全部瞬时失败）。那处改动会跟着 rsync 一起进入
+# 本仓，而本仓恰恰**靠 push 触发免费构建**。2026-11-14 实历：不还原的话
+# `git push` 成功、Actions 一条 run 都不起、零提示——出片通道静默关闭。
+#
+# 所以这里显式保证 push: 存在；下面的自检再确认一次（自检失败就不许提交）。
+workflow = Path(".github/workflows/image.yml")
+wf = workflow.read_text(encoding="utf-8")
+# 必须锚定行首：`push: true`（build-push-action 的入参）也含 "  push:" 子串，
+# 用 `in` 判断会把「没有触发器」误判成「已经有了」——第一版就是这么错的，
+# 由下面的自检抓出来。
+if not re.search(r"^  push:", wf, re.M):
+    if wf.count("on:\n  workflow_dispatch:") == 1:
+        wf = wf.replace("on:\n  workflow_dispatch:", "on:\n  push:\n    branches: [main]\n  workflow_dispatch:")
+        workflow.write_text(wf, encoding="utf-8")
+        print("restored push trigger")
+    else:
+        raise SystemExit("image.yml 的 on: 段形状变了，无法自动还原 push 触发器——请人工核对")
 print("sanitised")
 PY
 
@@ -147,6 +170,29 @@ if grep -rnE '100\.64\.|192\.168\.|cheap3|cheap-3|xinru|tcr-relay|/etc/tcr-relay
   exit 1
 fi
 echo "clean"
+
+# ── 自检：推之前就红，别指望推完再看 ────────────────────────────────────────
+echo "== self-check"
+if ! grep -q '^  push:' .github/workflows/image.yml; then
+  echo "!! image.yml 没有 push 触发器：推上去不会起构建（出片静默关闭）" >&2
+  exit 1
+fi
+if [ -d graphify-out ]; then
+  echo "!! graphify-out/ 被带进公开仓——本地产物不该进公开历史" >&2
+  exit 1
+fi
+# 未跟踪目录会跟着提交进公开仓。只对**含文件**的目录报错：git 不收录空目录，
+# 空目录泄不出去，报了只会让这条闸常年红（最终被人无视）。
+untracked_dirs=$(git ls-files --others --exclude-standard --directory \
+  | grep '/$' | while IFS= read -r d; do
+      [ -n "$(find "$d" -type f -print -quit 2>/dev/null)" ] && echo "$d"
+    done || true)
+if [ -n "$untracked_dirs" ]; then
+  echo "!! 未跟踪目录里有文件，会一起进公开仓，先清理：" >&2
+  echo "$untracked_dirs" >&2
+  exit 1
+fi
+echo "ok"
 
 if [ "$DRY_RUN" = "--dry-run" ]; then
   echo "== dry run: not committing"
