@@ -2,10 +2,19 @@
 # Jobs are the only objects that receive PostgreSQL credentials. All scheduled
 # Jobs ship suspended until their real run/load pair has been verified.
 #
+# 🚫 不要 apply 本文件。它不是部署来源，apply 一次就会改坏线上——2026-11-14 实历：
+#    为了让新镜像生效我 apply 了本文件，结果 **9 条 cronjob 被静默 suspend**
+#    （本文件的 suspend 取值早已落后线上），并凭空新建了三个线上并不存在的
+#    CronJob（flk-law-load / guide-cases-crawl / wenshu-crawl，已删除）。
+#    部署来源是 chart `helm-law-scraw`：哪条点亮由 overlay `values-server1.yaml`
+#    决定，镜像 tag 在它的 `values.yaml`。改部署去改 chart。
+#
 # ⚠ SUPERSEDED (2026-10-14): the live objects are chart-managed — apply
-# helm-law-scraw (`helm template law-craw . --namespace scraw | kubectl apply -n
-# scraw -f -`). This standalone copy is kept for reference only; pins below were
-# synced to the chart on 2026-10-14 (Harbor retired 2026-10-11).
+# helm-law-scraw (`helm template law-craw . --namespace scraw \
+#   -f values-server1.yaml -f values-private.yaml | kubectl apply -n scraw -f -`).
+# This standalone copy is kept for reference only; pins below were synced to the
+# chart on 2026-10-14 (Harbor retired 2026-10-11), to the live image on
+# 2026-11-14, and its suspend flags now agree with values-server1.yaml.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -82,7 +91,7 @@ metadata:
     app.kubernetes.io/part-of: finddata
 spec:
   schedule: "30 5 * * *"
-  suspend: true
+  suspend: false
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -139,7 +148,7 @@ metadata:
     app.kubernetes.io/part-of: finddata
 spec:
   schedule: "20 3 * * *"
-  suspend: true
+  suspend: false
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -184,7 +193,7 @@ metadata:
     app.kubernetes.io/part-of: finddata
 spec:
   schedule: "40 4 * * *"
-  suspend: true
+  suspend: false
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -241,7 +250,7 @@ metadata:
     app.kubernetes.io/part-of: finddata
 spec:
   schedule: "30 3 * * *"
-  suspend: true
+  suspend: false
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -286,7 +295,7 @@ metadata:
     app.kubernetes.io/part-of: finddata
 spec:
   schedule: "50 4 * * *"
-  suspend: true
+  suspend: false
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -343,7 +352,7 @@ metadata:
     app.kubernetes.io/part-of: finddata
 spec:
   schedule: "40 3 * * *"
-  suspend: true
+  suspend: false
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -388,7 +397,7 @@ metadata:
     app.kubernetes.io/part-of: finddata
 spec:
   schedule: "0 5 * * *"
-  suspend: true
+  suspend: false
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -445,7 +454,7 @@ metadata:
     app.kubernetes.io/part-of: finddata
 spec:
   schedule: "50 3 * * *"
-  suspend: true
+  suspend: false
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -490,7 +499,7 @@ metadata:
     app.kubernetes.io/part-of: finddata
 spec:
   schedule: "10 5 * * *"
-  suspend: true
+  suspend: false
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
