@@ -33,7 +33,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-e584fc5
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-f07f441
               imagePullPolicy: IfNotPresent
               env:
                 - name: RUSTFS_ENDPOINT
