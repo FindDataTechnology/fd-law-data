@@ -2,6 +2,7 @@ import test from "node:test";
 import { mock } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createHttpSourceAdapter } from "../lib/legal-sources/sources/common.js";
 import { rmfyalkAdapter } from "../lib/legal-sources/sources/rmfyalk.js";
 import { mfaTreatyAdapter } from "../lib/legal-sources/sources/mfa-treaty.js";
 import { govRulesAdapter } from "../lib/legal-sources/sources/gov-rules.js";
@@ -636,3 +637,70 @@ function htmlHelper(html, { pages = null, buffers = {} } = {}) {
     },
   };
 }
+
+// ── 超尺寸附件只跳过它自己，不许把整篇文档拖死 ─────────────────────────────
+//
+// 2026-11-14 实历：mfa-treaty 一轮 planned=45 / emitted=40 / failures=5，那 5 条全是
+// `attachment too large (95–303MB)`。附件按整块 buffer 上传（MAX_BUFFER_BYTES=80MB），
+// 这个上限是永久性质，但原来的实现让它冒泡成「整篇文档失败」⇒ 正文一起丢、state
+// 哈希不推进 ⇒ 每天重下重试。判据：跳过附件、保住正文、并把事实记进 metadata。
+function oversizeAdapter() {
+  return createHttpSourceAdapter({
+    id: "unit-oversize",
+    docType: "treaty",
+    detail: { kind: "html" },
+    parseDetail: () => ({
+      title: "超尺寸附件样本",
+      content: "正文必须保住",
+      attachments: [{ url: "https://example.test/huge.pdf" }, { url: "https://example.test/ok.pdf" }],
+    }),
+  });
+}
+
+test("超尺寸附件只跳过该附件：正文照常产出，并记入 metadata.skipped_attachments", async () => {
+  const helpers = {
+    fetchText: async () => "<html></html>",
+    fetchJson: async () => { throw new Error("unexpected JSON"); },
+    fetchBuffer: async (url) => {
+      if (url.includes("huge.pdf")) {
+        throw Object.assign(new Error("attachment too large (303066234 bytes): " + url), {
+          name: "SourceHttpError", status: 413, code: "ATTACHMENT_TOO_LARGE", declaredBytes: 303066234,
+        });
+      }
+      return { body: Buffer.from("PDF"), contentType: "application/pdf" };
+    },
+  };
+  const detail = await oversizeAdapter().detail(
+    { source_id: "doc-1", url: "https://example.test/detail/1" }, helpers);
+
+  assert.equal(detail.document.content, "正文必须保住", "正文不能因为附件超尺寸而丢");
+  assert.equal(detail.artifacts.length, 1, "只保留存得下的那一个附件");
+  assert.equal(detail.artifacts[0].filename, "ok.pdf");
+  assert.deepEqual(detail.document.metadata.skipped_attachments, [
+    { url: "https://example.test/huge.pdf", bytes: 303066234, reason: "attachment_too_large" },
+  ], "跳过必须是可审计的事实，不是静默丢弃");
+});
+
+test("附件错误不带 ATTACHMENT_TOO_LARGE 时照旧抛出（不许被吞掉）", async () => {
+  const helpers = {
+    fetchText: async () => "<html></html>",
+    fetchJson: async () => { throw new Error("unexpected JSON"); },
+    fetchBuffer: async () => { throw new Error("socket hang up"); },
+  };
+  await assert.rejects(
+    () => oversizeAdapter().detail({ source_id: "doc-2", url: "https://example.test/detail/2" }, helpers),
+    /socket hang up/,
+    "瞬时错误必须冒泡，否则重试与告警都会静默失效",
+  );
+});
+
+test("没有跳过发生时 metadata 形状不变（不多出一个空键）", async () => {
+  const helpers = {
+    fetchText: async () => "<html></html>",
+    fetchJson: async () => { throw new Error("unexpected JSON"); },
+    fetchBuffer: async () => ({ body: Buffer.from("PDF"), contentType: "application/pdf" }),
+  };
+  const detail = await oversizeAdapter().detail({ source_id: "doc-3", url: "https://example.test/detail/3" }, helpers);
+  assert.equal(detail.artifacts.length, 2);
+  assert.equal("skipped_attachments" in detail.document.metadata, false);
+});
