@@ -49,7 +49,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: embedder
-              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-d3e975d
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-e584fc5
               imagePullPolicy: IfNotPresent
               env:
                 - name: RUSTFS_ENDPOINT
