@@ -52,6 +52,9 @@ spec:
                   value: "law_db"
                 - name: FD_CRAWL_DB_URL
                   valueFrom: {secretKeyRef: {name: federation-db, key: url}}
-                - name: FD_RUNNER_IMAGE_TAG
-                  value: "sha-b63d0d1"
+                # 这里曾经写着 FD_RUNNER_IMAGE_TAG: "sha-b63d0d1" —— 与上面 image:
+                # 只隔几行的手写副本，每次发版记得改 image 却漏改它，于是 crawl_runs
+                # 的 image_tag 长期撒谎（2026-11-14 两天内测到两遍，一次是 b63d0d1
+                # 对 30f5179，一次是 e584fc5 对 f07f441）。现在 tag 由 Dockerfile
+                # 烘进镜像（/app/IMAGE_TAG），这一处不再需要、也不许再写死。
               command: ["node", "bin/flk-load.mjs"]
