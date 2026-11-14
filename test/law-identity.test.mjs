@@ -131,3 +131,32 @@ test("已有行没有文号列时，从标题里回退提取", async () => {
     "没有 doc_number 列时应当回退到从标题提取，否则同一条会被重复插入",
   );
 });
+
+// 上面那条只证明「行里没有这个字段」——它喂的假数据是两个 JS 对象，
+// **根本发不出 SQL**。真正致命的是「表里没有这一列」：裸投影 `SELECT doc_number`
+// 会让 PostgreSQL 抛 42703，loader 在第一条记录上就崩（2026-11-14 实测
+// `law_db.laws` 只有 16 列、无 doc_number，flk-load 因此一条也写不进去；
+// 而单测当时全绿）。这里用会按真实库脾气报错的假客户端把那个缺口堵上。
+test("缺 doc_number 列的生产库不能让查询崩（42703）", async () => {
+  const calls = [];
+  const schemaAware = {
+    async query(sql, params) {
+      calls.push({ sql, params });
+      // 去掉「合法写法」的两处再判：把它们当普通词出现即为裸投影。
+      const stripped = String(sql)
+        .replace(/to_jsonb\(laws\)\s*->>\s*'doc_number'(\s+AS\s+doc_number)?/gi, "")
+        .replace(/'doc_number'/gi, "");
+      if (/\bdoc_number\b/i.test(stripped)) {
+        const err = new Error('字段 "doc_number" 不存在');
+        err.code = "42703";
+        throw err;
+      }
+      return { rows: [{ title: "行政单位财务规则（财政部令第113号）", doc_number: null }] };
+    },
+  };
+  const dup = await findCrossGenerationDuplicate(schemaAware, {
+    title: "行政单位财务规则（财政部令第113号）",
+  });
+  assert.equal(dup, true, "缺列时应回退到从标题提取并判为重复");
+  assert.match(calls[0].sql, /to_jsonb\(laws\)\s*->>\s*'doc_number'/);
+});
