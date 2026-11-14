@@ -42,7 +42,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-f01a776
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-492925f
               imagePullPolicy: IfNotPresent
               env:
                 - name: NODE_OPTIONS
@@ -107,7 +107,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: loader
-              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-f01a776
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-492925f
               imagePullPolicy: IfNotPresent
               env:
                 - name: NODE_OPTIONS
@@ -164,7 +164,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-f01a776
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-492925f
               imagePullPolicy: IfNotPresent
               env:
                 - name: NODE_OPTIONS
@@ -209,7 +209,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: loader
-              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-f01a776
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-492925f
               imagePullPolicy: IfNotPresent
               env:
                 - name: NODE_OPTIONS
@@ -266,7 +266,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-f01a776
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-492925f
               imagePullPolicy: IfNotPresent
               env:
                 - name: NODE_OPTIONS
@@ -311,7 +311,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: loader
-              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-f01a776
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-492925f
               imagePullPolicy: IfNotPresent
               env:
                 - name: NODE_OPTIONS
@@ -368,7 +368,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-f01a776
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-492925f
               imagePullPolicy: IfNotPresent
               env:
                 - name: NODE_OPTIONS
@@ -413,7 +413,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: loader
-              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-f01a776
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-492925f
               imagePullPolicy: IfNotPresent
               env:
                 - name: NODE_OPTIONS
@@ -470,7 +470,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-f01a776
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-492925f
               imagePullPolicy: IfNotPresent
               env:
                 - name: NODE_OPTIONS
@@ -515,7 +515,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: loader
-              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-f01a776
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-492925f
               imagePullPolicy: IfNotPresent
               env:
                 - name: NODE_OPTIONS
@@ -572,7 +572,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: report
-              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-f01a776
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-492925f
               imagePullPolicy: IfNotPresent
               env:
                 - name: NODE_OPTIONS
@@ -681,7 +681,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-f01a776
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-492925f
               imagePullPolicy: IfNotPresent
               env:
                 - name: NODE_OPTIONS
