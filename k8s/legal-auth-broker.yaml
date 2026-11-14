@@ -42,7 +42,7 @@ spec:
         fsGroup: 1001
       containers:
       - name: auth-broker
-        image: ccr.ccs.tencentyun.com/lawcraw-business/legal-auth-broker:sha-492925f
+        image: ccr.ccs.tencentyun.com/lawcraw-business/legal-auth-broker:sha-c33bf67
         imagePullPolicy: IfNotPresent
         ports:
         - name: novnc
@@ -167,7 +167,7 @@ spec:
     spec:
       containers:
       - name: lease-api
-        image: ccr.ccs.tencentyun.com/lawcraw-business/legal-auth-broker:sha-492925f
+        image: ccr.ccs.tencentyun.com/lawcraw-business/legal-auth-broker:sha-c33bf67
         imagePullPolicy: IfNotPresent
         ports:
         - name: http

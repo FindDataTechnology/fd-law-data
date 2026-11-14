@@ -51,7 +51,7 @@ spec:
           containers:
             - name: crawler
               # placeholder tag — bump on build (docker buildx via cheap-1 law-builder)
-              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data-wenshu:sha-492925f
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data-wenshu:sha-c33bf67
               imagePullPolicy: IfNotPresent
               env:
                 - name: RUSTFS_ENDPOINT
