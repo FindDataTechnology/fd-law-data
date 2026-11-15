@@ -611,8 +611,24 @@ spec:
                 # suspend: true，它从不运行 ⇒ 永远没有运行证据。不传这份清单，报告会
                 # 把它判成 stale 并每天 exit=2（2026-11-06→11-13 连续 8 天假红）。
                 # 清单由部署侧显式给出，不内省集群：本作业只有 PG 只读凭据。
+                #
+                # ⚠ **2026-11-14 起这份值已作废，别照抄回线上（2026-11-15 实历）**：
+                # 上面的推理只对「按点亮门合法停着、且没人在跑」的源成立。rmfyalk 属于
+                # 另一族——它的执行者是**平台派发器**（`crawl_sources` 里 enabled +
+                # schedule），chart 那个 CronJob 只是手工兜底，所以 chart 里也 suspend。
+                # 把这一族写进暂停名单，结果是「chart 关着」被当成「没人跑」：
+                #   · 它最后一次成功 crawl 停在 **2026-11-05T20:55Z（rows=15）**，
+                #     11-12T20:08Z 那次失败（rows=0），此后 10 天零产出；
+                #   · 而日报在这 10 天里一直绿（`paused = pausedSet.has() && stale`
+                #     ⇒ 报成「合法暂停」），断流完全不可见。
+                # 权威取值在 chart：`helm-law-scraw` 的 `legalSources.platformDispatched`
+                # 会把这一族**排除**出暂停名单，master（`values.yaml`）渲染出空前缀——
+                # 于是 rmfyalk 断流时日报以 `stale=rmfyalk-case-library` 退出 2，那是
+                # **恢复告警**，不是新故障（详见该仓 APPLY-NOTES「搬走一个源之后…」一节）。
+                # 2026-11-15 已把线上这条 cronjob 的该变量清空并实跑复核：
+                # `paused_sources: []` / `stale_sources: ["rmfyalk-case-library"]` / rc=2。
                 - name: LEGAL_PAUSED_SOURCES
-                  value: "rmfyalk-case-library"
+                  value: "rmfyalk-case-library"   # ⚠ 历史值，仅作 11-13 那次处置的留痕；线上应为空
                 # 2026-11-06: same reporting contract as scripts/report_special_run.sh
                 # (harden-crawl-gitops-foundation 5.2) — image has no psql, so the
                 # same-covenant INSERT runs via node/pg. started_at is captured by
