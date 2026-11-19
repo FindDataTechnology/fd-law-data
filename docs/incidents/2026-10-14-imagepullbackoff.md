@@ -30,7 +30,7 @@ tag**；另有一批对象仍钉 2026-10-11 退役的 Harbor，全凭节点缓�
    「已见过」的 tag 永不重灌——于是没有任何机制把 ccr 侧补回来。节点缓存一旦
    被 GC，pod 再也起不来。
 2. **退役 Harbor 遗留钉**：`flk-law-crawl`、`legal-auth-broker`、
-   `guide-cases-crawl`、`flk-embed` 仍钉 `100.64.0.8:30880`（10-11 已退役，
+   `guide-cases-crawl`、`flk-embed` 仍钉 `<registry>`（10-11 已退役，
    连接直接被拒），此前仅靠节点缓存运行。
 3. **放大器**：broker 停机 7h → 探活 401 → `crawl_identities` 里
    `rmfyalk/acct001` 进 `login_required` → dispatcher 每条 rmfyalk 单子判
@@ -90,7 +90,7 @@ tag**；另有一批对象仍钉 2026-10-11 退役的 Harbor，全凭节点缓�
 构成：`/var/lib/fd-open-data/pgdata` **21G（活的中央 PG，绝不可动）** +
 k3s 7.4G + docker 4.2G，盘仅 39G。已清掉 3 个无容器使用的旧 fd-law-data tag
 （~860MB），仍在 91%。**复发风险**：再触发驱逐会再次打掉 broker（法律线
-rmfyalk 会话租借依赖它）。建议迁 PG 数据目录到更大盘（xinru-server2 盘 24%）
+rmfyalk 会话租借依赖它）。建议迁 PG 数据目录到更大盘（an egress node 盘 24%）
 或扩盘——登记为遗留改进项。
 
 ## 防复发三件套

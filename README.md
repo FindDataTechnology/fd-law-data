@@ -1,5 +1,7 @@
 # fd-law-data
 
+> **Part of the [Lex line (寻数·识律)](https://www.finddatatech.cloud/products/lex) of [FindData](https://www.finddatatech.cloud)** — authoritative legal source crawling: snapshots, incremental pulls, backfills and the block-and-recover loop over five canonical sources.
+
 Incremental crawlers + loaders for Chinese legal open data. Node.js >= 20;
 runtime dependencies: `pg` (flk loader) and `playwright` (wenshu browser side).
 
@@ -192,7 +194,7 @@ uninstalled 2026-10-11). Tags are `sha-<7-char>` plus a rolling `main`.
 
 ```
 push → Actions image.yml → hkccr.ccs.tencentyun.com/lawcraw-business/fd-law-data
-     → cheap-3 tcr-relay (cron */5) → ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data
+     → the tcr-relay service (cron */5) → ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data
 ```
 
 Before a dry-run or a roll, warm the node and confirm the digest:
@@ -224,7 +226,7 @@ Rules that follow:
 
 **If Actions is blocked by account billing** (a run fails within seconds with
 "recent account payments have failed"), fall back to a **delta build on
-xinru-server2** — same region as ccr, so no cross-Pacific push:
+an egress node** — same region as ccr, so no cross-Pacific push:
 
 ```bash
 mkdir -p /root/delta-law/{bin,lib/legal-sources}     # target dirs must exist first
@@ -330,18 +332,18 @@ node bin/flk-crawl.mjs --dry-run --since 2026-08-01 --codes 201   # live crawl, 
 
 ## Deployment (live)
 
-**xinru cluster, `scraw` namespace** (where the proxy/scraw infra actually
+**the crawl cluster, `scraw` namespace** (where the proxy/scraw infra actually
 runs — NOT the migrating cheap cluster):
 
 ```bash
 # one-time secrets (already created 2026-09-18):
-#   harbor-lawcraw-pull            — dockerconfigjson for 100.64.0.8:30880/lawcraw_business
+#   <pull-secret>            — dockerconfigjson for <registry>/lawcraw_business
 #   flk-law-crawl-credentials      — rustfs-access-key / rustfs-secret-key
 kubectl -n scraw apply -f k8s/flk-crawl-cronjob.yaml   # daily 02:30 Asia/Shanghai
 ```
 
 Image: **built by the Jenkins job `fd-law-data`** — gitee push (webhook token
-`fd-law-data`) → `docker build` → push to `100.64.0.8:30880/lawcraw_business/`,
+`fd-law-data`) → `docker build` → push to `<registry>/lawcraw_business/`,
 tagged with the immutable `sha-<short-hash>` of the commit it was built from
 (push a branch and read the tag off the build log, then pin it in the
 manifest). The job also builds the Playwright image via the `BUILD_WENSHU`
@@ -353,7 +355,7 @@ parameter, off by default because the build node's disk is tight.
 # the pipeline is the fleet's standard shape; copy from it rather than improvise
 ```
 
-Historically these images were hand-built via cheap-1
+Historically these images were hand-built via a worker node
 (`docker buildx --builder law-builder`): before the gitee repo and the Jenkins
 job existed there was no other channel, so `v0.1.x` tags are not reproducible
 and predate the job. New pins use `sha-<hash>` only.
@@ -560,7 +562,7 @@ is the live check.
 
 ### Deployment (live)
 
-**xinru cluster, `scraw` namespace**: helm chart `wenshuCrawl` block, or the
+**the crawl cluster, `scraw` namespace**: helm chart `wenshuCrawl` block, or the
 standalone `k8s/wenshu-crawl-cronjob.yaml`. Image:
 `lawcraw_business/fd-law-data-wenshu` — Playwright image built from
 `fd-law-data/Dockerfile.wenshu`.

@@ -6,7 +6,7 @@
 # 三镜像一次推送全绿（matrix，形态同 fd-wire build.yml）：
 #   fd-law-data         ← Dockerfile（flk/legal-source 爬虫主镜像）
 #   legal-auth-broker   ← Dockerfile.auth-broker（Harbor 侧镜像名：k8s 清单引
-#                          lawcraw_business/legal-auth-broker、cheap-3 tcr-relay
+#                          lawcraw_business/legal-auth-broker、the tcr-relay service
 #                          repos.conf 亦按此名登记；原 GHA 用的
 #                          fd-law-data-auth-broker 从未进 relay=ccr 侧无引用，
 #                          2026-10-09 改名对齐，避免双名分叉）
@@ -78,8 +78,8 @@ jobs:
       - uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.TCR_USERNAME }}
-          password: ${{ secrets.TCR_PASSWORD }}
+          username: ${{ secrets.TCR_USER }}
+          password: ${{ secrets.TCR_PASS }}
       - id: meta
         uses: docker/metadata-action@v5
         with:
