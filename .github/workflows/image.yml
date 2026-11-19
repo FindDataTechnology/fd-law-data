@@ -26,6 +26,8 @@ name: image
 # scs001/fd-law-data 承担（免费；已用 git tree 逐 blob 核对与本源仓 0 差异）。
 # 本仓 CI 因组织私有额度耗尽而全部瞬时失败，无产出。保留手动入口以便回滚。
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
