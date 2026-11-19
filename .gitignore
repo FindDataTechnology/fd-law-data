@@ -43,3 +43,7 @@ coverage/
 
 # Local SQLite scratch databases
 /daas.db
+
+# 部署清单已被 helm-law-scraw chart 接管（2026-11-14 收敛）。
+# 保留在盘上作历史参考，不进公开面。
+k8s/
