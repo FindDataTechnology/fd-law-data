@@ -42,8 +42,6 @@ env:
   NAMESPACE: lawcraw-business
 
 jobs:
-  # 测试先跑：爬虫切片/分页/幂等与 auth-broker 会话状态机是核心不变量，
-  # 测试不过不应出片。node --test 全部离线（Playwright 只做 DOM 解析，不起浏览器）。
   test:
     runs-on: ubuntu-latest
     steps:
@@ -60,103 +58,28 @@ jobs:
       - name: Test suite
         run: npm test
 
-  build-push:
+  fd-law-data:
     needs: test
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - image: fd-law-data
-            dockerfile: Dockerfile
-          - image: legal-auth-broker
-            dockerfile: Dockerfile.auth-broker
-          - image: fd-law-data-wenshu
-            dockerfile: Dockerfile.wenshu
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.TCR_USER }}
-          password: ${{ secrets.TCR_PASS }}
-      - id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image }}
-          # 只推滚动 main。不可变 tag 由下面的内容闸门按 digest 追加，三条腿各自判定：
-          # 只改主 Dockerfile 时，auth-broker / wenshu 两条腿内容不变、不铸 tag。
-          tags: |
-            type=raw,value=main
+    uses: FindDataTechnology/fd-ci/.github/workflows/image-build.yml@main
+    secrets: inherit
+    with:
+      image: fd-law-data
+      namespace: lawcraw-business
 
-      - id: prev
-        name: 读 main 当前 digest（内容基线）
-        run: |
-          img="$REGISTRY/$NAMESPACE/${{ matrix.image }}"
-          cur=$(docker buildx imagetools inspect "$img:main" \
-                --format '{{.Manifest.Digest}}' 2>/dev/null || true)
-          echo "digest=$cur" >> "$GITHUB_OUTPUT"
-          echo "${{ matrix.image }} main 当前 digest: ${cur:-<不存在，本次为首次构建>}"
+  legal-auth-broker:
+    needs: test
+    uses: FindDataTechnology/fd-ci/.github/workflows/image-build.yml@main
+    secrets: inherit
+    with:
+      image: legal-auth-broker
+      namespace: lawcraw-business
+      dockerfile: Dockerfile.auth-broker
 
-      # 与下面「铸不可变 tag」用的是**同一个表达式**：镜像把自己烘进的 tag 说成
-      # sha-<7>，而它被推上去的 tag 也是 sha-<7>。两处各写一份就会漂（实测两遍），
-      # 所以这里只算一次，两处都读它。
-      - id: tag
-        name: 算不可变 tag（构建参数与铸 tag 共用）
-        run: echo "immutable=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
-
-      - id: build
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          platforms: linux/amd64
-          push: true
-          # 硬约束：开了 attestation，同内容两次构建 digest 必然不同，闸门永久失效。
-          provenance: false
-          tags: ${{ steps.meta.outputs.tags }}
-          build-args: |
-            IMAGE_TAG=${{ steps.tag.outputs.immutable }}
-          cache-from: type=gha,scope=${{ matrix.image }}
-          cache-to: type=gha,scope=${{ matrix.image }},mode=max
-
-      # 内容闸门：digest 变了才铸 sha-<commit>，让「同内容多 tag」结构上不可能。
-      - name: 内容变了才铸不可变 tag
-        env:
-          NEW: ${{ steps.build.outputs.digest }}
-          OLD: ${{ steps.prev.outputs.digest }}
-          IMAGE: ${{ matrix.image }}
-        run: |
-          set -euo pipefail
-          img="$REGISTRY/$NAMESPACE/$IMAGE"
-          [ -n "$NEW" ] || { echo "::error::构建未产出 digest"; exit 1; }
-          if [ "$NEW" = "$OLD" ]; then
-            echo "$IMAGE 内容未变（$NEW）：不铸新 tag"
-            {
-              echo "### $IMAGE：内容未变，未产出新 tag"
-              echo ""
-              echo "本次构建与 \`main\` 当前指向完全一致。"
-              echo ""
-              echo "- 可直接 pin：\`$img@$NEW\`"
-              echo "- 滚动引用：\`$img:main\`"
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          tag="sha-${GITHUB_SHA::7}"
-          # 与构建参数同一个值：IMAGE_TAG 烘进镜像、这里铸成 tag，两处必须逐字相同，
-          # 否则镜像自报的 tag 与真 tag 分叉（那正是 11-11/11-12 遥测撒谎的形态）。
-          [ "$tag" = "${{ steps.tag.outputs.immutable }}" ] || {
-            echo "::error::铸出的 tag ($tag) 与构建参数 (${{ steps.tag.outputs.immutable }}) 不一致"; exit 1; }
-          docker buildx imagetools create -t "$img:$tag" "$img@$NEW"
-          echo "已铸 $IMAGE:$tag → $NEW"
-          {
-            echo "### $IMAGE：内容有变化，已铸不可变 tag"
-            echo ""
-            echo "| 字段 | 值 |"
-            echo "|---|---|"
-            echo "| tag | \`$tag\` |"
-            echo "| digest | \`$NEW\` |"
-            echo "| 上一内容 digest | \`${OLD:-<无>}\` |"
-          } >> "$GITHUB_STEP_SUMMARY"
+  fd-law-data-wenshu:
+    needs: test
+    uses: FindDataTechnology/fd-ci/.github/workflows/image-build.yml@main
+    secrets: inherit
+    with:
+      image: fd-law-data-wenshu
+      namespace: lawcraw-business
+      dockerfile: Dockerfile.wenshu
